@@ -8,75 +8,139 @@ export CPU_ARCHITECTURE=""
 export ARCH=""
 export SUPPORTED=false
 
-# Function to update the system based on the detected OS
-update_system() {
-    case "$OS" in
-        debian|ubuntu)
-            echo "Updating Debian/Ubuntu system..."
-            sudo apt-get update && sudo apt-get upgrade -y
-            ;;
-        centos)
-            echo "Updating CentOS system..."
-            sudo yum update -y
-            ;;
-        *)
-            echo "Unsupported distribution. Please update manually."
-            exit 1
-            ;;
-    esac
+update_repos() {
+  local args=""
+  [[ $1 == true ]] && args="-qq"
+  case "$OS" in
+  ubuntu | debian)
+    apt-get -y $args update
+    ;;
+  *)
+    # Do nothing as AlmaLinux and RockyLinux update metadata before installing packages.
+    ;;
+  esac
 }
 
-# Function to install Docker
-install_docker() {
+# First argument list of packages to install, second argument for quite mode
+install_packages() {
+  local args=""
+  if [[ $2 == true ]]; then
     case "$OS" in
-        debian|ubuntu)
-            echo "Installing Docker on Debian/Ubuntu system..."
-            export DEBIAN_FRONTEND=noninteractive
-            sudo apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release
-            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-            echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-            sudo apt-get install -y docker-ce docker-ce-cli containerd.io
-            ;;
-        centos|rocky|almalinux)
-            echo "Installing Docker on CentOS/RHEL system..."
-            sudo yum install -y yum-utils
-            sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-            sudo yum install -y docker-ce docker-ce-cli containerd.io
-            ;;
-        *)
-            echo "Unsupported distribution. Docker installation not supported."
-            exit 1
-            ;;
+    ubuntu | debian) args="-qq" ;;
+    *) args="-q" ;;
     esac
+  fi
+
+  # Eval needed for proper expansion of arguments
+  case "$OS" in
+  ubuntu | debian)
+    eval apt-get -y $args install "$1"
+    ;;
+  centos | rocky | almalinux)
+    eval dnf -y $args install "$1"
+    ;;
+  esac
 }
 
-enable_and_start_docker() {
-    echo "Enabling and starting Docker service..."
-    sudo systemctl enable docker
-    sudo systemctl start docker
+install_firewall() {
+  case "$OS" in
+  ubuntu | debian)
+    output ""
+    output "Installing Uncomplicated Firewall (UFW)"
+
+    if ! [ -x "$(command -v ufw)" ]; then
+      update_repos true
+      install_packages "ufw" true
+    fi
+
+    ufw --force enable
+
+    success "Enabled Uncomplicated Firewall (UFW)"
+
+    ;;
+  centos | rocky | almalinux)
+
+    output ""
+    output "Installing FirewallD"+
+
+    if ! [ -x "$(command -v firewall-cmd)" ]; then
+      install_packages "firewalld" true
+    fi
+
+    systemctl --now enable firewalld >/dev/null
+
+    success "Enabled FirewallD"
+
+    ;;
+  esac
 }
 
-# Function to configure firewall
-configure_firewall() {
-    case "$OS" in
-        debian|ubuntu)
-            echo "Configuring firewall for Debian/Ubuntu system..."
-            sudo ufw allow 80/tcp
-            sudo ufw allow 443/tcp
-            sudo ufw enable
-            ;;
-        centos|rocky|almalinux)
-            echo "Configuring firewall for CentOS/RHEL system..."
-            sudo firewall-cmd --permanent --add-port=80/tcp
-            sudo firewall-cmd --permanent --add-port=443/tcp
-            sudo firewall-cmd --no-reload
-            ;;
-        *)
-            echo "Unsupported distribution. Firewall configuration not supported."
-            exit 1
-            ;;
-    esac
+firewall_allow_ports() {
+  case "$OS" in
+  ubuntu | debian)
+    for port in $1; do
+      ufw allow "$port"
+    done
+    ufw --force reload
+    ;;
+  centos | rocky | almalinux)
+    for port in $1; do
+      firewall-cmd --zone=public --add-port="$port"/tcp --permanent
+    done
+    firewall-cmd --reload -q
+    ;;
+  esac
 }
+
+enable_services() {
+  systemctl start docker
+  systemctl enable docker
+}
+
+dep_install() {
+  output "Installing dependencies for $OS $OS_VER..."
+
+  install_firewall && firewall_ports
+
+  case "$OS" in
+  ubuntu | debian)
+    install_packages "gnupg lsb-release"
+
+    mkdir -p /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
+
+    echo \
+      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$OS \
+      $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list >/dev/null
+    ;;
+
+  centos | rocky | almalinux)
+    install_packages "dnf-utils"
+    dnf config-manager --add-repo=https://download.docker.com/linux/centos/docker-ce.repo
+
+    install_packages "device-mapper-persistent-data lvm2"
+    ;;
+  esac
+
+  # Update the new repos
+  update_repos
+
+  # Install dependencies
+  install_packages "docker-ce docker-ce-cli containerd.io"
+
+  enable_services
+
+  success "Dependencies installed!"
+}
+
+firewall_ports() {
+  output "Opening port 22 (SSH), 443 (FTP) in the firewall"
+
+  firewall_allow_ports "22 443"
+
+  success "Firewall ports opened!"
+}
+
 
 if [[ $EUID -ne 0 ]]; then
   error "This script must be executed with root privileges."
@@ -197,15 +261,9 @@ if [ "$SUPPORTED" == false ]; then
 fi
 
 
-if ! command -v docker &> /dev/null; then
-    echo "Docker is not installed. Installing Docker..."
-    install_docker
-else
-    echo "Docker is already installed."
-fi
+perform_install() {
+  output "Installing Embermanager"
+  dep_install
 
-enable_and_start_docker
-
-configure_firewall
-
-update_system
+  return 0
+}
