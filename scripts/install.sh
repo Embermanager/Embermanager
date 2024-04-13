@@ -45,8 +45,7 @@ install_packages() {
 install_firewall() {
   case "$OS" in
   ubuntu | debian)
-    output ""
-    output "Installing Uncomplicated Firewall (UFW)"
+    echo "Installing Uncomplicated Firewall (UFW)"
 
     if ! [ -x "$(command -v ufw)" ]; then
       update_repos true
@@ -55,13 +54,12 @@ install_firewall() {
 
     ufw --force enable
 
-    success "Enabled Uncomplicated Firewall (UFW)"
+    echo "Enabled Uncomplicated Firewall (UFW)"
 
     ;;
   centos | rocky | almalinux)
 
-    output ""
-    output "Installing FirewallD"+
+    echo "Installing FirewallD"+
 
     if ! [ -x "$(command -v firewall-cmd)" ]; then
       install_packages "firewalld" true
@@ -69,7 +67,7 @@ install_firewall() {
 
     systemctl --now enable firewalld >/dev/null
 
-    success "Enabled FirewallD"
+    echo "Enabled FirewallD"
 
     ;;
   esac
@@ -98,7 +96,7 @@ enable_services() {
 }
 
 dep_install() {
-  output "Installing dependencies for $OS $OS_VER..."
+  echo "Installing dependencies for $OS $OS_VER..."
 
   install_firewall && firewall_ports
 
@@ -130,20 +128,20 @@ dep_install() {
 
   enable_services
 
-  success "Dependencies installed!"
+  echo "Dependencies installed!"
 }
 
 firewall_ports() {
-  output "Opening port 22 (SSH), 443 (FTP) in the firewall"
+  echo "Opening port 22 (SSH), 443 (FTP) in the firewall"
 
   firewall_allow_ports "22 443"
 
-  success "Firewall ports opened!"
+  echo "Firewall ports opened!"
 }
 
 
 if [[ $EUID -ne 0 ]]; then
-  error "This script must be executed with root privileges."
+  echo "This script must be executed with root privileges."
   exit 1
 fi
 
@@ -192,7 +190,7 @@ arm64 | aarch64)
   ARCH=arm64
   ;;
 *)
-  error "Only x86_64 and arm64 are supported!"
+  echo "Only x86_64 and arm64 are supported!"
   exit 1
   ;;
 esac
@@ -255,14 +253,14 @@ esac
 
 # exit if not supported
 if [ "$SUPPORTED" == false ]; then
-  output "$OS $OS_VER is not supported"
-  error "Unsupported OS"
+  echo "$OS $OS_VER is not supported"
+  echo "Unsupported OS"
   exit 1
 fi
 
 
 perform_install() {
-  output "Installing Embermanager"
+  echo "Installing Embermanager"
   dep_install
 
   return 0
