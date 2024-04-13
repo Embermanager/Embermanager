@@ -267,3 +267,5 @@ perform_install() {
 
   return 0
 }
+
+perform_install
