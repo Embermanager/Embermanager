@@ -2,7 +2,8 @@
 
 # Set the root password
 echo "Setting root password..."
-echo "root:Carter#123" | sudo chpasswd
+echo "root:password" | sudo chpasswd
+#change password
 
 # Unlock the root account if it's locked
 echo "Unlocking root account..."
