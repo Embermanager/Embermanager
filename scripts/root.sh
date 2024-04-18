@@ -1,9 +1,12 @@
 #!/bin/bash
 
+# Prompt the user for the root password
+echo "Enter the root password:"
+read -s password
+
 # Set the root password
 echo "Setting root password..."
-echo "root:password" | sudo chpasswd
-#change password
+echo "root:$password" | sudo chpasswd
 
 # Unlock the root account if it's locked
 echo "Unlocking root account..."
